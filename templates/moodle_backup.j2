@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Make sure moodle maintenance mode is disabled when we are done
+trap "{{ docker_cli_cmd }}/maintenance.php --disable" EXIT
+
+# set moodle to maintenance mode
+{{ docker_cli_cmd }}/maintenance.php --enable
+
+source {{ project_root }}/.env
+{{ compose_base_cmd }} moodle_db mysqldump --single-transaction -h localhost -uadmin -p"$MOODLE_DB_PASSWORD" moodle > {{ moodle_database_dump_dir }}/db_dump_mysql_moodle.sql
+
+# run indivudual backup jobs
+{% for backup_job in backup_jobs %}
+( {{ backup_job }} ) &
+{% endfor %}
+wait
+
+# end maintenance mode
+{{ docker_cli_cmd }}/maintenance.php --disable
+
+# delete trap
+trap "" EXIT

@@ -1,0 +1,91 @@
+---
+
+- name: Ensure https config
+  block:
+  - name: Remove default nginx config
+    file:
+      name: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Ensure folder for letsencrypt exists
+    file:
+      name: /var/www/letsencrypt
+      state: directory
+
+  - name: Ensure nginx site for letsencrypt requests
+    template:
+      src: http.conf.j2
+      dest: "/etc/nginx/sites-available/{{ nginx_domain_name}}.http.conf"
+
+  - name: Ensure generic nginx config is applied
+    file:
+      state: link
+      src: "/etc/nginx/sites-available/{{ nginx_domain_name}}.http.conf"
+      dest: "/etc/nginx/sites-enabled/{{ nginx_domain_name}}.http.conf"
+    notify: reload nginx
+
+######################################
+
+- name: Ensure letsencrypt config
+  block:
+  - name: Add certbot apt repo
+    apt_repository:
+      repo: ppa:certbot/certbot
+      state: present
+    when: ansible_facts['lsb']['id'] == "Ubuntu" and ansible_facts['lsb']['major_release']| int == 18
+
+  - name: Install certbot
+    apt:
+      pkg:
+        - certbot
+        - python3-certbot-nginx
+      update_cache: true
+      state: present
+
+  - name: Ensure Let's Encrypt uses API v2
+    lineinfile:
+      path: /etc/letsencrypt/cli.ini
+      regexp: '^server'
+      line: 'server = https://acme-v02.api.letsencrypt.org/directory'
+
+  - name: Register certbot certificate file
+    stat:
+      path: "/etc/letsencrypt/live/{{ nginx_domain_name }}/fullchain.pem"
+    register: certbot_certificate_file_path
+
+  - name: Generate Certificates
+    command: certbot certonly -d {{ nginx_domain_name }} --agree-tos --email {{ letsencrypt_email }} -n --nginx
+    notify: reload nginx
+    when: not certbot_certificate_file_path.stat.exists
+
+######################################
+
+- name: Ensure nginx config
+  block:
+  - name: Ensure nginx subconfig folder exists
+    file:
+      path: "/etc/nginx/{{ nginx_domain_name }}.d"
+      state: directory
+
+  - name: Register certbot certificate file
+    stat:
+      path: "/etc/letsencrypt/live/{{ nginx_domain_name }}/fullchain.pem"
+    register: certbot_certificate_file_path
+
+  - name: Ensure availability of generic nginx config
+    template:
+      src: https.conf.j2
+      dest: "/etc/nginx/sites-available/{{ nginx_domain_name }}.https.conf"
+
+  - name: Generate dhparams
+    shell: openssl dhparam -out /etc/nginx/dhparams.pem 2048
+    args:
+      creates: /etc/nginx/dhparams.pem
+
+  - name: Ensure generic nginx config is applied
+    file:
+      state: link
+      src: "/etc/nginx/sites-available/{{ nginx_domain_name }}.https.conf"
+      dest: "/etc/nginx/sites-enabled/{{ nginx_domain_name }}.https.conf"
+    when: certbot_certificate_file_path.stat.exists
+    notify: reload nginx

@@ -1,0 +1,309 @@
+---
+- name: Check .env file
+  stat: 
+    path: "{{ project_root }}/.env"
+  register: env_file
+  changed_when: not env_file.stat.exists
+  notify:
+    - init env
+
+###################################### SET UP NGINX VIRTUAL HOST
+
+- import_tasks: nginx_virtual_host.yml
+  when: config_nginx|default(true)|bool
+
+
+###################################### QUERY VERSION TAGS
+
+- name: Query moodle tags from github
+  uri:
+    url: https://api.github.com/repos/moodle/moodle/tags
+    return_content: true                                             
+  register: moodle_github_tags
+  ignore_errors: yes                                          
+
+- name: Query latest memcached docker release
+  shell: "wget -q https://registry.hub.docker.com/v1/repositories/memcached/tags -O - | sed -e 's/[][]//g' -e 's/\"//g' -e 's/ //g' | tr '}' '\n'  | awk -F: '{print $3}' | awk '/^[1-9].[0-9].([0-9]|[1-9][0-9])$/{print}' | sort -V"
+  register: memcached_version_query
+
+- name: Query latest redis docker release
+  shell: "wget -q https://registry.hub.docker.com/v1/repositories/redis/tags -O - | sed -e 's/[][]//g' -e 's/\"//g' -e 's/ //g' | tr '}' '\n'  | awk -F: '{print $3}' | awk '/^[1-9].[0-9].([0-9]|[1-9][0-9])$/{print}' | sort -V"
+  register: redis_version_query
+
+- name: Register moodle_tag
+  set_fact:
+    moodle_tag:  "{{ (moodle_github_tags.json  | rejectattr('name', 'contains', '-') | selectattr('name', 'contains', 'v'+default_major_moodle) | list)[0]['name'] }}"
+  when: (moodle_tag == None)
+
+- name: Get moodle tarball github url
+  set_fact:
+    moodle_tarball_url:  "{{ (moodle_github_tags.json | selectattr('name', 'equalto', moodle_tag) | list)[0]['tarball_url'] }}"
+
+- name: Registering release tags for memcached
+  set_fact:
+    memcached_tag: "{{ memcached_version_query.stdout_lines[-1] }}"
+  when: (memcached_tag == None)
+
+- name: Registering release tags for redis
+  set_fact:
+    redis_tag: "{{ redis_version_query.stdout_lines[-1] }}"
+  when: (redis_tag == None)
+
+###################################### ENSURE DIRECTORIES AND TEMPLATES
+
+- name: Ensure directories
+  file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    state: directory
+    recurse: "{{ item.r }}"
+  loop:
+    - { path: "/etc/nginx/{{ nginx_domain_name }}.d", owner: "root", r: "no" }
+    - { path: "{{ project_root }}", owner: "{{ server_user }}", r: "no" }
+    - { path: "{{ project_root }}/data/config", owner: "root", r: "no" }
+    - { path: "{{ project_root }}/build", owner: "root", r: "no" }
+    - { path: "{{ moodle_database_dump_dir }}", owner: "{{ server_user }}", r: "no" }
+
+- name: Ensure local directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop: "{{ local_files_dirs }}"
+  delegate_to: 127.0.0.1
+  become: no
+  run_once: true
+
+- name: Ensure nginx template
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { file: "nginx.j2", destination: "/etc/nginx/{{ nginx_domain_name }}.d/nginx.conf", owner: "root", mode: "0644" }
+  become: yes
+  when: nginx_domain_name != None
+  notify:
+    - reload nginx
+
+- name: init templates
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "docker-compose.j2", destination: "{{ project_root }}/docker-compose.yml", owner: "{{ server_user }}", mode: "0755" }
+    - { file: "config_plugin.j2", destination: "{{ project_root }}/config_plugin.sh", owner: "{{ server_user }}", mode: "0755" }
+    - { file: "reset_policy_agreed.j2", destination: "{{ project_root }}/reset_policy_agreed.sh", owner: "{{ server_user }}", mode: "0755" }
+    - { file: "uploads.ini.j2", destination: "{{ project_root }}/data/config/uploads.ini", owner: "root", mode: "0755" }
+    - { file: "moodle_backup.j2", destination: "{{ config_file_backup }}", owner: "root", mode: "0750" }
+  notify:
+    - compose down
+    - compose up
+
+###################################### TERMS AND CONDITIONS
+
+- name: Check terms and conditions file
+  stat: 
+    path: "{{ playbook_dir }}/files/{{ docker_config_project }}/templates/conditions.j2"
+  register: cond_file
+  changed_when: False
+  delegate_to: 127.0.0.1
+  run_once: true
+  become: no
+
+- name: Ensure terms and conditions
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "{{ playbook_dir }}/files/{{ docker_config_project }}/templates/conditions.j2", destination: "{{ project_root }}/data/moodle/www/login/conditions.html", owner: "www-data", mode: "0755" }
+  ignore_errors: yes
+  when: cond_file.stat.exists
+  notify:
+    - reset policy agree
+
+######################################
+
+- name: init Dockerfile moodle template
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "Dockerfile_moodle.j2", destination: "{{ project_root }}/build/Dockerfile_moodle", owner: "{{ server_user }}", mode: "0755" }
+  notify:
+    - compose down
+    - docker build custom moodle
+    - compose up
+
+- name: init Dockerfile redis template
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "Dockerfile_redis.j2", destination: "{{ project_root }}/build/Dockerfile_redis", owner: "{{ server_user }}", mode: "0755" }
+  notify:
+    - compose down
+    - docker build redis
+    - compose up
+
+- import_tasks: build_base.yml
+
+- name: Compose restart state
+  assert: { that: true, quiet: true }
+  changed_when: true
+  notify:
+    - compose down
+  when: restart_compose|bool
+
+- name: Compose startup state
+  assert: { that: true, quiet: true }
+  changed_when: true
+  notify:
+    - compose up
+  when: start_compose|bool
+
+- name: Ensure backup cron job
+  cron:
+    name: moodle backup
+    minute: "{{ config_backup_cron.minute }}"
+    hour:   "{{ config_backup_cron.hour }}"
+    day:  "{{ config_backup_cron.day }}"
+    month: "{{ config_backup_cron.month }}"
+    user: root
+    job: "{{ config_file_backup }} > /dev/null 2>&1"
+    cron_file: "{{ config_file_backup_cron }}"
+    state: "{% if config_backups_enabled|bool %}present{% else %}absent{% endif %}"
+
+- name: Flush handlers
+  meta: flush_handlers
+
+######################################
+
+- name: Ensure language packs
+  block:
+  - name: Ensure language packs downloaded
+    ansible.builtin.unarchive:
+      src: "moodle/langs/{{ moodle_version_lang_tag }}/{{ item }}.zip"
+      dest: "{{ moodle_lang_dir }}"
+      group: "www-data"
+      owner: "www-data"
+    loop: "{{ moodle_languages }}"
+
+  when: ensure_langs|default(false)|bool
+
+######################################
+
+- name: Ensure moodle plugins 
+  block:
+
+  - name: Ensure plugins
+    ansible.builtin.unarchive:
+      src: "{{ docker_config_project }}/plugins/{{ item }}"
+      dest: "{{ project_root }}/data/moodle/www/mod/"
+      owner: "www-data"
+    loop: "{{ plugin_list }}"
+    notify:
+      - compose down
+      - compose up
+
+  - name: Flush handlers
+    meta: flush_handlers
+  when: ensure_plugins|default(false)|bool
+
+######################################
+
+- name: Run upgrade CLI block
+  block:
+  - name: Run upgrade CLI
+    shell: '{{ docker_cli_cmd }}{{ item }}'
+    become: yes
+    changed_when: false
+    loop:
+      - "/upgrade.php --non-interactive"
+
+  rescue:
+  - name: Wait a bit
+    ansible.builtin.pause:
+      seconds: 10
+
+  - name: Run upgrade CLI
+    shell: '{{ docker_cli_cmd }}{{ item }}'
+    become: yes
+    changed_when: false
+    loop:
+      - "/upgrade.php --non-interactive"
+  when: config_cli|bool
+
+- name: Configure moodle with CLI 
+  block:
+  - name: Create command CLI command list
+    set_fact: 
+        moodle_config_cli_list: "{{ moodle_config_cli|default([]) + [ docker_php_cli+item ] }}"
+    loop: "{{ moodle_config_cli }}"
+    when: fast_config|bool
+
+  - name: Configure moodle
+    shell: '{{ compose_base_cmd }} moodle bash -c "{{ moodle_config_cli_list|flatten|join("; ") }}"'
+    become: yes
+    changed_when: false
+    when: fast_config|bool
+
+  - name: Configure moodle
+    shell: '{{ docker_cli_cmd }}{{ item }}'
+    become: yes
+    changed_when: false
+    loop: "{{ moodle_config_cli }}"
+    when: not fast_config|bool
+  
+  when: config_cli|bool
+
+- name: Configure moodle plugins in database 
+  block:
+  - name: Configure moodle
+    shell: './config_plugin.sh {{ item }}'
+    args:
+      chdir: "{{ project_root }}"
+    become: yes
+    changed_when: true
+    loop: "{{ moodle_config_plugin_db }}"
+    notify:
+      - compose down
+      - compose up
+  
+  when: config_db_plugin|bool
+
+######################################
+
+- name: Ensure cronjob
+  cron:
+    name: moodle cronjob
+    minute: '*/5'
+    user: root
+    job: " ( {{ docker_cli_cmd }}/cron.php > /dev/null 2>&1 ) "
+    cron_file: "moodle_cron"
+
+- name: Ensure system scripts
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "moodle_cron.j2", destination: "/usr/local/bin/moodle_cron", owner: "root", mode: "0750" }

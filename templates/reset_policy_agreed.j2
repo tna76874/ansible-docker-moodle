@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Forcing all non-admin-users to agree policy on new moodle login
+#
+# usage: ./reset_policy_agreed.sh
+#
+# Checking:
+# docker exec -i moodle_moodle_db_1 mysql -uadmin -p${MOODLE_DB_PASSWORD} -e "select * FROM moodle.mdl_user WHERE policyagreed='1' and auth='oauth2' and deleted='0'"
+
+cd {{ project_root }}
+
+source ./.env
+
+docker exec -i {{ docker_config_project }}_moodle_db_1 mysql -uadmin -p${MOODLE_DB_PASSWORD} -e "UPDATE moodle.mdl_user SET policyagreed='0' WHERE policyagreed='1' and auth='oauth2' and deleted='0'"

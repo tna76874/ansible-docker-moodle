@@ -1,0 +1,81 @@
+---
+- name: init env
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  become: yes
+  loop:
+    - { file: "env.j2", destination: "{{ project_root }}/.env", owner: "{{ server_user }}", mode: "0755" }
+  notify:
+    - compose down
+    - compose up
+
+- name: reload nginx
+  service:
+    name: nginx
+    state: reloaded
+  ignore_errors: yes
+
+- name: compose down
+  docker_compose:
+    project_src: "{{ project_root }}"
+    state: absent
+  ignore_errors: yes
+
+- name: docker build custom moodle
+  community.docker.docker_image:
+    name: "moodlebuild:{{ moodle_tag }}"
+    build:
+      path: "{{ project_root }}/build"
+      dockerfile: "Dockerfile_moodle"
+    source: build
+  become: yes
+  notify:
+    - moodle version
+
+- name: docker build redis
+  community.docker.docker_image:
+    name: "redisbuild:{{ redis_tag }}"
+    build:
+      path: "{{ project_root }}/build"
+      dockerfile: "Dockerfile_redis"
+    source: build
+  become: yes
+  notify:
+    - redis version
+
+- name: compose up
+  docker_compose:
+    project_src: "{{ project_root }}"
+    state: present
+    pull: False
+  notify:
+    - wait for
+    - compose up
+
+- name: wait for
+  uri:
+    url: "http://localhost:{{ compose_config_tcp_port }}"
+    validate_certs: no
+    status_code: [200,412]
+  register: result
+  until: result.status == 200
+  retries: 40
+  delay: 10
+
+- name: reset policy agree
+  shell: './reset_policy_agreed.sh'
+  args:
+    chdir: "{{ project_root }}"
+  become: yes
+
+- name: moodle version
+  ansible.builtin.debug:
+    msg: "Moodle version: {{ moodle_tag }}"
+
+- name: redis version
+  ansible.builtin.debug:
+    msg: "Redis version: {{ redis_tag }}"

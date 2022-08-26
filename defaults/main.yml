@@ -1,0 +1,119 @@
+---
+# set docker moodle tag; pull latest explicit tag if left blank.
+moodle_tag: 
+default_major_moodle: "4"
+
+# mariadb docker tag
+mariadb_tag: '10.2'
+
+# redis docker tag
+redis_tag: 
+
+# memcached docker tag
+memcached_tag: 
+
+# ensure docker-compose gets restarted on every run
+pull_compose: yes
+
+# docker-compose project name
+docker_config_project: moodle
+
+# start docker by default
+start_compose: true
+restart_compose: false
+
+# running user
+server_user: root
+
+# directories
+project_root: "/srv/{{ docker_config_project }}"
+moodle_database_dump_dir: "{{ project_root }}/db_backup"
+build_repo: { url: "https://github.com/ellakcy/docker-moodle.git", version: "master" }
+moodle_base_build_dir: "{{ project_root }}/build_base"
+moodle_base_dockerfile: "{{ moodle_base_build_dir }}/dockerfiles/apache/Dockerfile"
+local_files_dirs:
+  - "{{ playbook_dir }}/files/{{ docker_config_project }}/plugins"
+  - "{{ playbook_dir }}/files/{{ docker_config_project }}/langs"
+  - "{{ playbook_dir }}/files/{{ docker_config_project }}/templates"
+
+# public domain of the server
+nginx_domain_name: 
+# Docker-compose configs
+compose_config_startup: always
+compose_config_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+compose_config_db: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+compose_config_default_mail: "info@local.de"
+
+compose_moodle_url: "https://{{ nginx_domain_name }}"
+
+upload_limit: '200M'
+compose_php_upload_limit: "{{ upload_limit }}"
+
+#Docker execution settings
+compose_executable: "/usr/local/bin/docker-compose"
+compose_base_cmd: "{{ compose_executable }} -f {{ project_root }}/docker-compose.yml exec -T"
+docker_php_cli: "/usr/local/bin/php /var/www/html/admin/cli"
+docker_cli_cmd: "{{ compose_base_cmd }} moodle {{ docker_php_cli }}"
+
+fast_config: false
+
+# env
+compose_config_tcp_port: "3454"
+compose_config_env:
+  - { var: "MOODLE_URL", val: "{{ compose_moodle_url }}" }
+  - { var: "MOODLE_ADMIN", val: "{{ compose_moodle_admin_user | default('admin') }}" }
+  - { var: "MOODLE_ADMIN_PASSWORD", val: "$MOODLE_ADMIN_PASSWORD" }
+  - { var: "MOODLE_ADMIN_EMAIL", val: "{{ compose_config_default_mail }}" }
+  - { var: "MOODLE_DB_TYPE", val: "mysqli" }
+  - { var: "MOODLE_DB_HOST", val: "moodle_db" }
+  - { var: "MOODLE_DB_USER", val: "{{ compose_moodle_db_user | default('admin') }}" }
+  - { var: "MOODLE_DB_PASSWORD", val: "$MOODLE_DB_PASSWORD" }
+  - { var: "MOODLE_DB_NAME", val: "{{ compose_moodle_db_name | default('moodle') }}" }
+  - { var: "MOODLE_REVERSE_LB", val: "1" }
+  - { var: "MOODLE_SSL", val: "1" }
+  - { var: "MOODLE_EMAIL_TYPE_QMAIL", val: "false" }
+  - { var: "MOODLE_EMAIL_HOST", val: "" }
+
+compose_config_env_db:
+  - { var: "MYSQL_RANDOM_ROOT_PASSWORD", val: "yes" }
+  - { var: "MYSQL_ONETIME_PASSWORD", val: "yes" }
+  - { var: "MYSQL_DATABASE", val: "{{ compose_moodle_db_name | default('moodle') }}" }
+  - { var: "MYSQL_USER", val: "{{ compose_moodle_db_user | default('admin') }}" }
+  - { var: "MYSQL_PASSWORD", val: "$MOODLE_DB_PASSWORD" }
+
+# plugin config
+plugin_list: []
+  # create folder files/moodle/plugin on playbook level and download plugin archives from https://moodle.org/plugins/
+  # - { src: "moodle/plugins/mod_collabora_moodle311_2021120102.zip", dest: "{{ project_root }}/data/moodle/www/mod/", name: "collabora" }
+
+moodle_config_cli: []
+moodle_config_plugin_db: []
+
+config_cli: true
+config_db_plugin: true
+
+# languages
+moodle_languages:
+  - 'de'
+  # - 'en'
+  # - 'ar'
+  # - 'hr'
+  # - 'fr'
+  # - 'it'
+  # - 'lt'
+  # - 'pt'
+  # - 'ru'
+  # - 'es'
+  # - 'uk'
+  # - 'tr'
+
+moodle_version_lang_tag:
+moodle_lang_dir: "{{ project_root }}/data/moodle/lang"
+
+# BACKUPs
+backup_jobs: []
+config_backups_enabled: true
+config_backup_cron: { month: "*", day: "*", hour: "4", minute: "15" }
+config_file_backup : "/usr/local/bin/moodle_backup"
+config_file_backup_cron : "moodle_backup"

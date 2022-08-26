@@ -1,0 +1,26 @@
+galaxy_info:
+  author: github.com/tna76874
+  description: Moodle with docker-compose
+  company:
+  license: AGPL-3.0-only
+  min_ansible_version: 2.1
+  platforms:
+    - name: Debian
+      versions:
+        - buster
+    - name: Ubuntu
+      versions:
+        - bionic
+        - focal
+  galaxy_tags:
+    - docker
+    - compose
+    - moodle
+    - redis
+    - memcached
+    - letsencrypt
+    - server
+    - web
+dependencies: []
+collections:
+  - community.docker

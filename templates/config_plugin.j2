@@ -1,0 +1,13 @@
+#!/bin/bash
+
+#
+# usage: ./config_plugin.sh plugin name value
+#
+# example:
+# docker exec -i {{ docker_config_project }}_moodle_db_1 mysql -uadmin -p${MOODLE_DB_PASSWORD} -e "select * FROM moodle.mdl_config_plugins where plugin='theme_boost'"
+
+cd {{ project_root }}
+
+source ./.env
+
+docker exec -i {{ docker_config_project }}_moodle_db_1 mysql -uadmin -p${MOODLE_DB_PASSWORD} -e "UPDATE moodle.mdl_config_plugins SET value='$3' WHERE plugin='$1' and name='$2'"

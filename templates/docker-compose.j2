@@ -1,0 +1,54 @@
+---
+version: '2'
+
+services:
+
+  moodle_db:
+    image: mariadb:{{ mariadb_tag }}
+    restart: always
+    volumes:
+      - './data/db:/var/lib/mysql'
+    environment:
+{% for dbenvs in compose_config_env_db %}
+      - {{ dbenvs.var }}={{ dbenvs.val }}
+{% endfor %}
+
+  redis:
+    image: redisbuild:{{ redis_tag }}
+    restart: always
+
+  memcached:
+    image: memcached:{{ memcached_tag }}
+    restart: always
+    expose:
+      - "11211"
+
+  moodle:
+    image: moodlebuild:{{ moodle_tag }}
+    restart: always
+    volumes:
+      - './data/moodle:/var/moodledata'
+      - './data/moodle/www:/var/www/html'
+      - './data/config/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini'
+    ports:
+      - '127.0.0.1:{{ compose_config_tcp_port }}:80'
+    healthcheck:
+      test: curl --fail http://localhost:80 || exit 1
+      interval: 60s
+      retries: 5
+      start_period: 300s
+      timeout: 15s
+    depends_on:
+      - moodle_db
+      - redis
+      - memcached
+    links:
+      - moodle_db
+      - redis
+      - memcached
+    environment:
+{% for envs in compose_config_env %}
+      - {{ envs.var }}={{ envs.val }}
+{% endfor %}
+
+
