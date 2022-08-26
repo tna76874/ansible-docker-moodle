@@ -14,7 +14,7 @@ Either clone from the github repository,
 git clone https://github.com/tna76874/ansible-docker-moodle.git
 ```
 
-of install with ansible galaxy:
+or install with ansible galaxy:
 
 ```bash
 ansible-galaxy install tna76874.ansible_docker_moodle
