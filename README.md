@@ -55,8 +55,8 @@ First, you have to initialize the `main.yml` playbook with suitable variables.
     # Unzip lang packs in e.g. files/moodle/langs/3.11/
     moodle_languages:
       - 'de'
-	# ensure plugins from files/moodle/plugins/ that are previously downloaded from https://moodle.org/plugins/
-	ensure_plugins: True
+    # ensure plugins from files/moodle/plugins/ that are previously downloaded from https://moodle.org/plugins/
+    ensure_plugins: True
     plugin_list:
       - "mod_collabora_moodle311_2021120102.zip"
       - "mod_jitsi_moodle40_2022070602.zip"
