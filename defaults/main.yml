@@ -7,10 +7,10 @@ default_major_moodle: "4"
 mariadb_tag: '10.2'
 
 # redis docker tag
-redis_tag: 
+redis_tag:
 
 # memcached docker tag
-memcached_tag: 
+memcached_tag:
 
 # ensure docker-compose gets restarted on every run
 pull_compose: yes
@@ -92,6 +92,7 @@ moodle_config_plugin_db: []
 
 config_cli: true
 config_db_plugin: true
+config_reset_policy_on_change: false
 
 # languages
 moodle_languages:

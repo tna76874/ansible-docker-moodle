@@ -71,6 +71,7 @@
   args:
     chdir: "{{ project_root }}"
   become: yes
+  when: config_reset_policy_on_change|bool
 
 - name: moodle version
   ansible.builtin.debug:

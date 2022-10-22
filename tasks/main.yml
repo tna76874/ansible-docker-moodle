@@ -12,42 +12,49 @@
 - import_tasks: nginx_virtual_host.yml
   when: config_nginx|default(true)|bool
 
-
 ###################################### QUERY VERSION TAGS
-
+## MOODLE
 - name: Query moodle tags from github
   uri:
-    url: https://api.github.com/repos/moodle/moodle/tags
-    return_content: true                                             
+    url: https://api.github.com/repos/moodle/moodle/tags?page_size=10000
+    return_content: true
   register: moodle_github_tags
   ignore_errors: yes                                          
 
-- name: Query latest memcached docker release
-  shell: "wget -q https://registry.hub.docker.com/v1/repositories/memcached/tags -O - | sed -e 's/[][]//g' -e 's/\"//g' -e 's/ //g' | tr '}' '\n'  | awk -F: '{print $3}' | awk '/^[1-9].[0-9].([0-9]|[1-9][0-9])$/{print}' | sort -V"
-  register: memcached_version_query
-
-- name: Query latest redis docker release
-  shell: "wget -q https://registry.hub.docker.com/v1/repositories/redis/tags -O - | sed -e 's/[][]//g' -e 's/\"//g' -e 's/ //g' | tr '}' '\n'  | awk -F: '{print $3}' | awk '/^[1-9].[0-9].([0-9]|[1-9][0-9])$/{print}' | sort -V"
-  register: redis_version_query
-
 - name: Register moodle_tag
   set_fact:
-    moodle_tag:  "{{ (moodle_github_tags.json  | rejectattr('name', 'contains', '-') | selectattr('name', 'contains', 'v'+default_major_moodle) | list)[0]['name'] }}"
-  when: (moodle_tag == None)
+    moodle_tag:  "{{ (moodle_github_tags.json | rejectattr('name', 'contains', '-') | selectattr('name', 'contains', 'v'+default_major_moodle) | list)[0]['name'] }}"
+  when: (moodle_tag|default(None) == None)
 
 - name: Get moodle tarball github url
   set_fact:
     moodle_tarball_url:  "{{ (moodle_github_tags.json | selectattr('name', 'equalto', moodle_tag) | list)[0]['tarball_url'] }}"
 
+## MEMCACHED
+- name: Query latest memcached docker release
+  uri:
+    url: https://hub.docker.com/v2/repositories/library/memcached/tags?page_size=10000
+    return_content: true
+  register: memcached_version_query
+  ignore_errors: yes
+
 - name: Registering release tags for memcached
   set_fact:
-    memcached_tag: "{{ memcached_version_query.stdout_lines[-1] }}"
-  when: (memcached_tag == None)
+    memcached_tag: "{{ (memcached_version_query.json['results'] | rejectattr('name', 'equalto', 'latest') | rejectattr('name', 'contains', 'alpine') | rejectattr('name', 'contains', '-') | selectattr('name', 'contains', '.') | list)[0]['name'] }}"
+  when: (memcached_tag|default(None) == None)
+
+# ## REDIS
+- name: Query latest redis docker release
+  uri:
+    url: https://hub.docker.com/v2/repositories/library/redis/tags?page_size=10000
+    return_content: true
+  register: redis_version_query
+  ignore_errors: yes
 
 - name: Registering release tags for redis
   set_fact:
-    redis_tag: "{{ redis_version_query.stdout_lines[-1] }}"
-  when: (redis_tag == None)
+    redis_tag: "{{ (redis_version_query.json['results'] | rejectattr('name', 'equalto', 'latest') | rejectattr('name', 'contains', 'alpine')| rejectattr('name', 'contains', '-') | selectattr('name', 'contains', '.') | list)[0]['name'] }}"
+  when: (redis_tag|default(None) == None)
 
 ###################################### ENSURE DIRECTORIES AND TEMPLATES
 
